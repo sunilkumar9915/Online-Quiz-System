@@ -1,1121 +1,329 @@
-
-const API_URL = "http://localhost:5000";
+const API_URL = "https://online-quiz-system-991.onrender.com";
 
 let token = localStorage.getItem("token");
-let user = null;
-
-try {
-    user = JSON.parse(localStorage.getItem("user"));
-} catch {
-    user = null;
-}
-
 let quizzes = [];
 let currentQuiz = null;
 let currentQuestion = 0;
 let score = 0;
 let selectedAnswer = null;
-let answers = [];
-let timerInterval;
+let timerInterval = null;
 let timeLeft = 0;
-let resultSubmitted = false;
-let allAdminResults = [];
 
 const loginBox = document.getElementById("loginBox");
-const registerBox = document.getElementById("registerBox");
 const quizBox = document.getElementById("quizBox");
-const userDashboard = document.getElementById("userDashboard");
-const adminBox = document.getElementById("adminBox");
 const questionBox = document.getElementById("questionBox");
 const resultBox = document.getElementById("resultBox");
 
-function showRegister() {
-    loginBox.classList.add("hidden");
-    registerBox.classList.remove("hidden");
-}
+async function apiRequest(endpoint, options = {}) {
+    const headers = {
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options.headers
+    };
 
-function showLogin() {
-    registerBox.classList.add("hidden");
-    loginBox.classList.remove("hidden");
-}
+    const response = await fetch(`${API_URL}${endpoint}`, {
+        ...options,
+        headers
+    });
 
-async function register() {
-    const name = document.getElementById("registerName").value.trim();
-    const email = document.getElementById("registerEmail").value.trim();
-    const password = document.getElementById("registerPassword").value;
-    const message = document.getElementById("registerMessage");
+    const data = await response.json().catch(() => ({}));
 
-    if (!name || !email || !password.trim()) {
-        message.textContent = "Please fill all fields";
-        return;
+    if (!response.ok) {
+        throw new Error(data.message || "Request failed");
     }
 
-    try {
-        const response = await fetch(`${API_URL}/api/auth/signup`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
-            body: JSON.stringify({ name, email, password })
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            message.textContent = data.message || "Registration failed";
-            return;
-        }
-
-        message.textContent = "Account created successfully";
-
-        document.getElementById("registerName").value = "";
-        document.getElementById("registerEmail").value = "";
-        document.getElementById("registerPassword").value = "";
-
-        setTimeout(showLogin, 1000);
-    } catch {
-        message.textContent = "Server is not running";
-    }
+    return data;
 }
 
 async function login() {
     const email = document.getElementById("email").value.trim();
     const password = document.getElementById("password").value;
-    const message = document.getElementById("loginMessage");
+    const loginMessage = document.getElementById("loginMessage");
 
     if (!email || !password) {
-        message.textContent = "Please enter email and password";
+        loginMessage.textContent = "Please enter email and password";
         return;
     }
 
     try {
-        const response = await fetch(`${API_URL}/api/auth/login`, {
+        const data = await apiRequest("/api/auth/login", {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json"
-            },
             body: JSON.stringify({ email, password })
         });
 
-        const data = await response.json();
-
-        if (!response.ok) {
-            message.textContent = data.message || "Login failed";
-            return;
-        }
-
         token = data.token;
-        user = data.user;
-
         localStorage.setItem("token", token);
-        localStorage.setItem("user", JSON.stringify(user));
+        localStorage.setItem("user", JSON.stringify(data.user));
 
         loginBox.classList.add("hidden");
-        registerBox.classList.add("hidden");
-        quizBox.classList.remove("hidden");
-
-        if (user.role === "admin") {
-            adminBox.classList.remove("hidden");
-            await Promise.all([
-                loadAdminStats(),
-                loadAdminQuizzes(),
-                loadAdminResults()
-            ]);
-        } else {
-            adminBox.classList.add("hidden");
-        }
+        loginMessage.textContent = "";
 
         await loadQuizzes();
-    } catch {
-        message.textContent = "Server is not running";
+    } catch (error) {
+        loginMessage.textContent = error.message;
+    }
+}
+
+async function signup() {
+    const name = document.getElementById("name")?.value.trim();
+    const email = document.getElementById("email").value.trim();
+    const password = document.getElementById("password").value;
+    const loginMessage = document.getElementById("loginMessage");
+
+    if (!name || !email || !password) {
+        loginMessage.textContent = "Please fill in all fields";
+        return;
+    }
+
+    try {
+        const data = await apiRequest("/api/auth/signup", {
+            method: "POST",
+            body: JSON.stringify({ name, email, password })
+        });
+
+        loginMessage.textContent = data.message || "Registration successful. Please log in.";
+    } catch (error) {
+        loginMessage.textContent = error.message;
     }
 }
 
 async function loadQuizzes() {
-    if (!token) return;
-
     try {
-        const response = await fetch(`${API_URL}/api/quizzes`, {
-            headers: {
-                Authorization: `Bearer ${token}`
-            }
-        });
+        const data = await apiRequest("/api/quizzes");
 
-        const data = await response.json();
+        quizzes = Array.isArray(data) ? data : data.quizzes || [];
 
-        if (!response.ok) {
-            alert(data.message || "Unable to load quizzes");
-            return;
-        }
-
-        quizzes = Array.isArray(data) ? data : [];
+        quizBox.classList.remove("hidden");
+        questionBox.classList.add("hidden");
+        resultBox.classList.add("hidden");
 
         const quizList = document.getElementById("quizList");
         quizList.innerHTML = "";
 
-        if (!quizzes.length) {
-            quizList.textContent = "No quizzes available.";
+        if (quizzes.length === 0) {
+            quizList.textContent = "No quizzes available";
             return;
         }
 
-        quizzes.forEach(quiz => {
-            const div = document.createElement("div");
-            div.className = "quiz-card";
+        quizzes.forEach((quiz, index) => {
+            const card = document.createElement("div");
+            card.className = "quiz-card";
 
-            const title = document.createElement("h3");
+            const title = document.createElement("h2");
             title.textContent = quiz.title;
 
             const duration = document.createElement("p");
             duration.textContent = `Duration: ${quiz.duration} minutes`;
 
-            const questions = document.createElement("p");
-            questions.textContent = `Questions: ${(quiz.questions || []).length}`;
+            const count = document.createElement("p");
+            count.textContent = `Questions: ${(quiz.questions || []).length}`;
 
-            const button = document.createElement("button");
-            button.textContent = "Start Quiz";
-            button.onclick = () => startQuiz(quiz._id);
+            const startButton = document.createElement("button");
+            startButton.textContent = "Start Quiz";
+            startButton.addEventListener("click", () => startQuiz(index));
 
-            div.append(title, duration, questions, button);
-            quizList.appendChild(div);
+            card.append(title, duration, count, startButton);
+            quizList.appendChild(card);
         });
-    } catch {
-        console.log("Unable to load quizzes");
+    } catch (error) {
+        alert(error.message);
     }
 }
 
-async function loadAdminQuizzes() {
-    if (!token || !user || user.role !== "admin") return;
+function startQuiz(index) {
+    currentQuiz = quizzes[index];
 
-    try {
-        const response = await fetch(`${API_URL}/api/quizzes`, {
-            headers: {
-                Authorization: `Bearer ${token}`
-            }
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) return;
-
-        const adminQuizList = document.getElementById("adminQuizList");
-        adminQuizList.innerHTML = "";
-
-        if (!Array.isArray(data) || !data.length) {
-            adminQuizList.textContent = "No quizzes created yet.";
-            return;
-        }
-
-        data.forEach(quiz => {
-            const div = document.createElement("div");
-            div.className = "quiz-card";
-
-            const title = document.createElement("h3");
-            title.textContent = quiz.title;
-
-            const duration = document.createElement("p");
-            duration.textContent = `Duration: ${quiz.duration} minutes`;
-
-            const questions = document.createElement("p");
-            questions.textContent = `Questions: ${(quiz.questions || []).length}`;
-
-            const editButton = document.createElement("button");
-            editButton.textContent = "Edit";
-            editButton.onclick = () => editQuiz(quiz._id);
-
-            const deleteButton = document.createElement("button");
-            deleteButton.textContent = "Delete";
-            deleteButton.onclick = () => deleteQuiz(quiz._id);
-
-            div.append(title, duration, questions, editButton, deleteButton);
-            adminQuizList.appendChild(div);
-        });
-    } catch {
-        console.log("Unable to load admin quizzes");
-    }
-}
-
-async function loadAdminStats() {
-    if (!token || !user || user.role !== "admin") return;
-
-    try {
-        const response = await fetch(`${API_URL}/api/auth/stats`, {
-            headers: {
-                Authorization: `Bearer ${token}`
-            }
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            console.log("Unable to load admin stats");
-            return;
-        }
-
-        document.getElementById("totalUsers").textContent = data.totalUsers ?? 0;
-        document.getElementById("totalQuizzes").textContent = data.totalQuizzes ?? 0;
-        document.getElementById("totalAttempts").textContent = data.totalAttempts ?? 0;
-        document.getElementById("averageScore").textContent = `${data.averageScore ?? 0}%`;
-    } catch {
-        console.log("Unable to load admin stats");
-    }
-}
-
-async function loadAdminResults() {
-    if (!token || !user || user.role !== "admin") return;
-
-    const resultsList = document.getElementById("adminResultsList");
-    if (!resultsList) return;
-
-    resultsList.textContent = "Loading results...";
-
-    try {
-        const response = await fetch(`${API_URL}/api/results`, {
-            headers: {
-                Authorization: `Bearer ${token}`
-            }
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            resultsList.textContent = data.message || "Unable to load results";
-            return;
-        }
-
-        allAdminResults = Array.isArray(data) ? data : [];
-
-        populateQuizFilter();
-        attachResultFilterEvents();
-        renderAdminResults();
-    } catch {
-        resultsList.textContent = "Unable to load student results.";
-    }
-}
-
-function populateQuizFilter() {
-    const quizFilter = document.getElementById("resultsQuizFilter");
-    if (!quizFilter) return;
-
-    const previousValue = quizFilter.value;
-    const uniqueQuizzes = new Map();
-
-    allAdminResults.forEach(result => {
-        const quiz = result.quiz;
-
-        if (quiz && typeof quiz === "object" && quiz._id) {
-            uniqueQuizzes.set(String(quiz._id), quiz.title || "Untitled Quiz");
-        }
-    });
-
-    quizFilter.innerHTML = "";
-
-    const allOption = document.createElement("option");
-    allOption.value = "";
-    allOption.textContent = "All Quizzes";
-    quizFilter.appendChild(allOption);
-
-    uniqueQuizzes.forEach((title, id) => {
-        const option = document.createElement("option");
-        option.value = id;
-        option.textContent = title;
-        quizFilter.appendChild(option);
-    });
-
-    if ([...quizFilter.options].some(option => option.value === previousValue)) {
-        quizFilter.value = previousValue;
-    }
-}
-
-function attachResultFilterEvents() {
-    const searchInput = document.getElementById("resultsSearch");
-    const quizFilter = document.getElementById("resultsQuizFilter");
-    const scoreFilter = document.getElementById("resultsScoreFilter");
-
-    if (searchInput && searchInput.dataset.bound !== "true") {
-        searchInput.addEventListener("input", renderAdminResults);
-        searchInput.dataset.bound = "true";
-    }
-
-    if (quizFilter && quizFilter.dataset.bound !== "true") {
-        quizFilter.addEventListener("change", renderAdminResults);
-        quizFilter.dataset.bound = "true";
-    }
-
-    if (scoreFilter && scoreFilter.dataset.bound !== "true") {
-        scoreFilter.addEventListener("change", renderAdminResults);
-        scoreFilter.dataset.bound = "true";
-    }
-}
-
-function renderAdminResults() {
-    const resultsList = document.getElementById("adminResultsList");
-    const searchInput = document.getElementById("resultsSearch");
-    const quizFilter = document.getElementById("resultsQuizFilter");
-    const scoreFilter = document.getElementById("resultsScoreFilter");
-
-    if (!resultsList) return;
-
-    const search = searchInput ? searchInput.value.trim().toLowerCase() : "";
-    const selectedQuiz = quizFilter ? quizFilter.value : "";
-    const selectedScore = scoreFilter ? scoreFilter.value : "";
-
-    const filteredResults = allAdminResults.filter(result => {
-        const student = result.user && typeof result.user === "object"
-            ? result.user
-            : {};
-
-        const quiz = result.quiz && typeof result.quiz === "object"
-            ? result.quiz
-            : {};
-
-        const name = String(student.name || "");
-        const email = String(student.email || "");
-        const title = String(quiz.title || "");
-        const percentage = Number(result.percentage ?? 0);
-
-        const matchesSearch =
-            name.toLowerCase().includes(search) ||
-            email.toLowerCase().includes(search) ||
-            title.toLowerCase().includes(search);
-
-        const matchesQuiz =
-            !selectedQuiz || String(quiz._id || "") === selectedQuiz;
-
-        let matchesScore = true;
-
-        if (selectedScore === "high") {
-            matchesScore = percentage >= 80;
-        } else if (selectedScore === "medium") {
-            matchesScore = percentage >= 40 && percentage < 80;
-        } else if (selectedScore === "low") {
-            matchesScore = percentage < 40;
-        }
-
-        return matchesSearch && matchesQuiz && matchesScore;
-    });
-
-    resultsList.innerHTML = "";
-
-    const count = document.createElement("p");
-    count.className = "results-count";
-    count.textContent = `Showing ${filteredResults.length} of ${allAdminResults.length} attempts`;
-    resultsList.appendChild(count);
-
-    if (!filteredResults.length) {
-        const empty = document.createElement("p");
-        empty.textContent = "No matching results found.";
-        resultsList.appendChild(empty);
+    if (!currentQuiz || !Array.isArray(currentQuiz.questions) ||
+        currentQuiz.questions.length === 0) {
+        alert("This quiz has no questions.");
         return;
     }
 
-    const wrapper = document.createElement("div");
-    wrapper.className = "results-table-wrapper";
+    currentQuestion = 0;
+    score = 0;
+    selectedAnswer = null;
 
-    const table = document.createElement("table");
-    table.className = "results-table";
+    clearInterval(timerInterval);
 
-    const thead = document.createElement("thead");
-    const headerRow = document.createElement("tr");
+    quizBox.classList.add("hidden");
+    resultBox.classList.add("hidden");
+    questionBox.classList.remove("hidden");
 
-    [
-        "Student",
-        "Email",
-        "Quiz",
-        "Score",
-        "Percentage",
-        "Completed"
-    ].forEach(label => {
-        const th = document.createElement("th");
-        th.textContent = label;
-        headerRow.appendChild(th);
-    });
+    document.getElementById("quizTitle").textContent = currentQuiz.title;
+    document.getElementById("quizDuration").textContent = currentQuiz.duration;
 
-    thead.appendChild(headerRow);
-
-    const tbody = document.createElement("tbody");
-
-    filteredResults.forEach(result => {
-        const row = document.createElement("tr");
-
-        const student = result.user && typeof result.user === "object"
-            ? result.user
-            : {};
-
-        const quiz = result.quiz && typeof result.quiz === "object"
-            ? result.quiz
-            : {};
-
-        const date = result.completedAt
-            ? new Date(result.completedAt).toLocaleString()
-            : "N/A";
-
-        const percentageValue = Number(result.percentage ?? 0);
-
-        const values = [
-            student.name || "Unknown Student",
-            student.email || "N/A",
-            quiz.title || "Quiz",
-            `${result.score ?? 0} / ${result.totalQuestions ?? 0}`,
-            `${percentageValue}%`,
-            date
-        ];
-
-        values.forEach((value, index) => {
-            const cell = document.createElement("td");
-            cell.textContent = String(value);
-
-            if (index === 4) {
-                const badge = document.createElement("span");
-                badge.className = "score-badge";
-
-                if (percentageValue >= 80) {
-                    badge.classList.add("score-high");
-                } else if (percentageValue >= 40) {
-                    badge.classList.add("score-medium");
-                } else {
-                    badge.classList.add("score-low");
-                }
-
-                badge.textContent = `${percentageValue}%`;
-                cell.textContent = "";
-                cell.appendChild(badge);
-            }
-
-            row.appendChild(cell);
-        });
-
-        tbody.appendChild(row);
-    });
-
-    table.append(thead, tbody);
-    wrapper.appendChild(table);
-    resultsList.appendChild(wrapper);
-}
-
-async function editQuiz(id) {
-    try {
-        const response = await fetch(`${API_URL}/api/quizzes/${id}`, {
-            headers: {
-                Authorization: `Bearer ${token}`
-            }
-        });
-
-        const quiz = await response.json();
-
-        if (!response.ok) {
-            alert(quiz.message || "Unable to load quiz");
-            return;
-        }
-
-        const newTitle = prompt("Enter Quiz Title", quiz.title);
-        if (newTitle === null) return;
-
-        const newDuration = prompt("Enter Duration in minutes", quiz.duration);
-        if (newDuration === null) return;
-
-        if (
-            !newTitle.trim() ||
-            !Number.isFinite(Number(newDuration)) ||
-            Number(newDuration) <= 0
-        ) {
-            alert("Please enter a valid title and duration");
-            return;
-        }
-
-        const updatedQuiz = {
-            title: newTitle.trim(),
-            duration: Number(newDuration),
-            questions: quiz.questions
-        };
-
-        const updateResponse = await fetch(`${API_URL}/api/quizzes/${id}`, {
-            method: "PUT",
-            headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`
-            },
-            body: JSON.stringify(updatedQuiz)
-        });
-
-        const data = await updateResponse.json();
-
-        if (!updateResponse.ok) {
-            alert(data.message || "Unable to update quiz");
-            return;
-        }
-
-        alert("Quiz updated successfully");
-
-        await Promise.all([
-            loadQuizzes(),
-            loadAdminQuizzes(),
-            loadAdminStats()
-        ]);
-    } catch {
-        alert("Unable to update quiz");
-    }
-}
-
-async function deleteQuiz(id) {
-    if (!confirm("Are you sure you want to delete this quiz?")) return;
-
-    try {
-        const response = await fetch(`${API_URL}/api/quizzes/${id}`, {
-            method: "DELETE",
-            headers: {
-                Authorization: `Bearer ${token}`
-            }
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            alert(data.message || "Unable to delete quiz");
-            return;
-        }
-
-        alert("Quiz deleted successfully");
-
-        await Promise.all([
-            loadQuizzes(),
-            loadAdminQuizzes(),
-            loadAdminStats()
-        ]);
-    } catch {
-        alert("Unable to delete quiz");
-    }
-}
-
-function addQuestion() {
-    const questionForm = document.getElementById("questionForm");
-    const questionCount = questionForm.querySelectorAll(".question-item").length + 1;
-    const div = document.createElement("div");
-
-    div.className = "question-item";
-
-    div.innerHTML = `
-        <h3>Question ${questionCount}</h3>
-        <input type="text" class="questionInput" placeholder="Enter Question">
-        <input type="text" class="optionInput" placeholder="Option 1">
-        <input type="text" class="optionInput" placeholder="Option 2">
-        <input type="text" class="optionInput" placeholder="Option 3">
-        <input type="text" class="optionInput" placeholder="Option 4">
-        <select class="answerInput">
-            <option value="">Select Correct Answer</option>
-            <option value="1">Option 1</option>
-            <option value="2">Option 2</option>
-            <option value="3">Option 3</option>
-            <option value="4">Option 4</option>
-        </select>
-        <button type="button" onclick="removeQuestion(this)">Remove Question</button>
-    `;
-
-    questionForm.appendChild(div);
-}
-
-function removeQuestion(button) {
-    button.parentElement.remove();
-
-    document.querySelectorAll(".question-item").forEach((item, index) => {
-        item.querySelector("h3").textContent = `Question ${index + 1}`;
-    });
-}
-
-function resetQuestionForm() {
-    document.getElementById("questionForm").innerHTML = `
-        <div class="question-item">
-            <h3>Question 1</h3>
-            <input type="text" class="questionInput" placeholder="Enter Question">
-            <input type="text" class="optionInput" placeholder="Option 1">
-            <input type="text" class="optionInput" placeholder="Option 2">
-            <input type="text" class="optionInput" placeholder="Option 3">
-            <input type="text" class="optionInput" placeholder="Option 4">
-            <select class="answerInput">
-                <option value="">Select Correct Answer</option>
-                <option value="1">Option 1</option>
-                <option value="2">Option 2</option>
-                <option value="3">Option 3</option>
-                <option value="4">Option 4</option>
-            </select>
-        </div>
-    `;
-}
-
-async function createQuiz() {
-    if (!token || !user || user.role !== "admin") {
-        alert("Admin access required");
-        return;
-    }
-
-    const title = document.getElementById("quizTitleInput").value.trim();
-    const duration = Number(document.getElementById("quizDurationInput").value);
-    const questionItems = document.querySelectorAll(".question-item");
-    const message = document.getElementById("adminMessage");
-
-    if (!title || !duration || duration <= 0) {
-        message.textContent = "Please enter a valid quiz title and duration";
-        return;
-    }
-
-    if (!questionItems.length) {
-        message.textContent = "Please add at least one question";
-        return;
-    }
-
-    const questions = [];
-
-    for (const item of questionItems) {
-        const question = item.querySelector(".questionInput").value.trim();
-
-        const options = Array.from(
-            item.querySelectorAll(".optionInput")
-        ).map(input => input.value.trim());
-
-        const answerValue = item.querySelector(".answerInput").value;
-
-        if (!question || options.some(option => !option) || !answerValue) {
-            message.textContent = "Please complete all questions";
-            return;
-        }
-
-        questions.push({
-            question,
-            options,
-            answer: options[Number(answerValue) - 1]
-        });
-    }
-
-    try {
-        const response = await fetch(`${API_URL}/api/quizzes`, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`
-            },
-            body: JSON.stringify({ title, duration, questions })
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            message.textContent = data.message || "Unable to create quiz";
-            return;
-        }
-
-        message.textContent = "Quiz created successfully";
-
-        document.getElementById("quizTitleInput").value = "";
-        document.getElementById("quizDurationInput").value = "";
-
-        resetQuestionForm();
-
-        await Promise.all([
-            loadQuizzes(),
-            loadAdminQuizzes(),
-            loadAdminStats()
-        ]);
-    } catch {
-        message.textContent = "Unable to create quiz";
-    }
-}
-
-async function startQuiz(id) {
-    try {
-        const response = await fetch(`${API_URL}/api/quizzes/${id}`, {
-            headers: {
-                Authorization: `Bearer ${token}`
-            }
-        });
-
-        const quiz = await response.json();
-
-        if (!response.ok) {
-            alert(quiz.message || "Unable to start quiz");
-            return;
-        }
-
-        if (!quiz.questions || !quiz.questions.length) {
-            alert("This quiz has no questions.");
-            return;
-        }
-
-        currentQuiz = quiz;
-        currentQuestion = 0;
-        score = 0;
-        selectedAnswer = null;
-        answers = Array(quiz.questions.length).fill(null);
-        resultSubmitted = false;
-
-        quizBox.classList.add("hidden");
-        adminBox.classList.add("hidden");
-        userDashboard.classList.add("hidden");
-        resultBox.classList.add("hidden");
-        questionBox.classList.remove("hidden");
-
-        document.getElementById("quizTitle").textContent = quiz.title;
-
-        startTimer();
-        showQuestion();
-    } catch {
-        alert("Unable to start quiz");
-    }
+    timeLeft = Number(currentQuiz.duration || 10) * 60;
+    startTimer();
+    showQuestion();
 }
 
 function startTimer() {
-    clearInterval(timerInterval);
-
-    timeLeft = Number(currentQuiz.duration) * 60;
-    updateTimer();
+    updateTimerDisplay();
 
     timerInterval = setInterval(() => {
         timeLeft--;
-        updateTimer();
+        updateTimerDisplay();
 
         if (timeLeft <= 0) {
             clearInterval(timerInterval);
-            showResult();
+            finishQuiz();
         }
     }, 1000);
 }
 
-function updateTimer() {
-    const minutes = Math.floor(timeLeft / 60);
-    const seconds = timeLeft % 60;
-    const timer = document.getElementById("timer");
+function updateTimerDisplay() {
+    let timer = document.getElementById("timer");
 
-    if (timer) {
-        timer.textContent =
-            `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+    if (!timer) {
+        timer = document.createElement("p");
+        timer.id = "timer";
+        questionBox.insertBefore(timer, questionBox.firstChild);
     }
+
+    const minutes = Math.floor(Math.max(0, timeLeft) / 60);
+    const seconds = Math.max(0, timeLeft) % 60;
+
+    timer.textContent =
+        `Time Left: ${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 function showQuestion() {
-    const question = currentQuiz.questions[currentQuestion];
+    const questionData = currentQuiz.questions[currentQuestion];
 
-    selectedAnswer = answers[currentQuestion] ?? null;
+    selectedAnswer = null;
 
     document.getElementById("questionNumber").textContent =
         `${currentQuestion + 1} / ${currentQuiz.questions.length}`;
 
-    document.getElementById("question").textContent = question.question;
+    document.getElementById("question").textContent = questionData.question;
 
-    const optionsBox = document.getElementById("options");
-    optionsBox.innerHTML = "";
+    const optionsContainer = document.getElementById("options");
+    optionsContainer.innerHTML = "";
 
-    question.options.forEach(option => {
+    const choices = Array.isArray(questionData.options)
+        ? questionData.options
+        : [];
+
+    choices.forEach(option => {
         const button = document.createElement("button");
-
         button.type = "button";
-        button.textContent = option;
-        button.className = "option-button";
+        button.className = "option";
 
-        if (selectedAnswer === option) {
+        const optionText = typeof option === "string"
+            ? option
+            : option.text ?? option.option ?? option.value ?? "";
+
+        button.textContent = optionText;
+
+        button.addEventListener("click", () => {
+            optionsContainer.querySelectorAll(".option").forEach(item => {
+                item.classList.remove("selected");
+            });
+
             button.classList.add("selected");
-        }
+            selectedAnswer = option;
+        });
 
-        button.onclick = () => selectOption(option, button);
-        optionsBox.appendChild(button);
+        optionsContainer.appendChild(button);
     });
 
-    const backButton = document.getElementById("backButton");
-    const nextButton = document.getElementById("nextButton");
-
-    if (backButton) {
-        backButton.disabled = currentQuestion === 0;
-    }
+    const nextButton = questionBox.querySelector("button[onclick='nextQuestion()']");
 
     if (nextButton) {
         nextButton.textContent =
             currentQuestion === currentQuiz.questions.length - 1
-                ? "Finish Quiz"
-                : "Next →";
+                ? "Submit Quiz"
+                : "Next";
     }
 }
 
-function selectOption(answer, button) {
-    if (resultSubmitted) return;
+function isCorrectAnswer(selected, correct) {
+    const selectedValue = typeof selected === "string"
+        ? selected
+        : selected.text ?? selected.option ?? selected.value;
 
-    selectedAnswer = answer;
-    answers[currentQuestion] = answer;
+    const correctValue = typeof correct === "string"
+        ? correct
+        : correct?.text ?? correct?.option ?? correct?.value;
 
-    document.querySelectorAll(".option-button").forEach(item => {
-        item.classList.remove("selected");
-    });
-
-    button.classList.add("selected");
+    return String(selectedValue).trim().toLowerCase() ===
+        String(correctValue).trim().toLowerCase();
 }
 
 function nextQuestion() {
-    if (resultSubmitted || !currentQuiz) return;
-
     if (selectedAnswer === null) {
         alert("Please select an answer");
         return;
     }
 
-    answers[currentQuestion] = selectedAnswer;
+    const questionData = currentQuiz.questions[currentQuestion];
 
-    if (currentQuestion === currentQuiz.questions.length - 1) {
-        showResult();
-        return;
+    if (isCorrectAnswer(selectedAnswer, questionData.answer)) {
+        score++;
     }
 
     currentQuestion++;
-    showQuestion();
-}
 
-function previousQuestion() {
-    if (resultSubmitted || !currentQuiz) return;
-
-    if (selectedAnswer !== null) {
-        answers[currentQuestion] = selectedAnswer;
-    }
-
-    if (currentQuestion > 0) {
-        currentQuestion--;
+    if (currentQuestion < currentQuiz.questions.length) {
         showQuestion();
+    } else {
+        finishQuiz();
     }
 }
 
-function getAnswerSummary() {
-    let correctAnswers = 0;
-    let wrongAnswers = 0;
-    let unanswered = 0;
+async function finishQuiz() {
+    clearInterval(timerInterval);
 
-    currentQuiz.questions.forEach((question, index) => {
-        const answer = answers[index];
-
-        if (answer === null || answer === undefined) {
-            unanswered++;
-        } else if (answer === question.answer) {
-            correctAnswers++;
-        } else {
-            wrongAnswers++;
-        }
-    });
-
-    return { correctAnswers, wrongAnswers, unanswered };
-}
-
-async function saveResult() {
-    if (!token || !user || !currentQuiz) return false;
+    questionBox.classList.add("hidden");
+    resultBox.classList.remove("hidden");
 
     const total = currentQuiz.questions.length;
-    const percentage = Math.round((score / total) * 100);
+    const percentage = total ? Math.round((score / total) * 100) : 0;
+
+    document.getElementById("result").textContent =
+        `You scored ${score} out of ${total}. Percentage: ${percentage}%`;
 
     try {
-        const response = await fetch(`${API_URL}/api/results`, {
+        await apiRequest("/api/results", {
             method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${token}`
-            },
             body: JSON.stringify({
-                quiz: currentQuiz._id,
+                quizId: currentQuiz._id,
                 score,
                 totalQuestions: total,
                 percentage
             })
         });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            console.error("Result save error:", data.message);
-            return false;
-        }
-
-        return true;
-    } catch {
-        console.error("Unable to save result");
-        return false;
+    } catch (error) {
+        console.error("Unable to save quiz result:", error.message);
     }
 }
 
-async function showResult() {
-    if (resultSubmitted || !currentQuiz) return;
-
-    resultSubmitted = true;
+async function showQuizzes() {
     clearInterval(timerInterval);
 
-    if (selectedAnswer !== null) {
-        answers[currentQuestion] = selectedAnswer;
-    }
-
-    const summary = getAnswerSummary();
-    score = summary.correctAnswers;
-
-    const total = currentQuiz.questions.length;
-    const percentage = Math.round((score / total) * 100);
-
-    let message;
-
-    if (percentage >= 80) {
-        message = "Excellent Performance! 🏆";
-    } else if (percentage >= 60) {
-        message = "Good Job! 👍";
-    } else if (percentage >= 40) {
-        message = "Keep Practicing! 💪";
-    } else {
-        message = "Better Luck Next Time! 📚";
-    }
-
-    questionBox.classList.add("hidden");
-    resultBox.classList.remove("hidden");
-
-    const resultElement = document.getElementById("result");
-
-    function renderResult(status) {
-        resultElement.innerHTML = `
-            <strong>${message}</strong>
-            <br><br>
-            You scored <strong>${score}</strong> out of <strong>${total}</strong>
-            <br><br>
-            Percentage: <strong>${percentage}%</strong>
-            <br><br>
-            <span style="color:#16a34a">Correct Answers: <strong>${summary.correctAnswers}</strong></span>
-            <br><br>
-            <span style="color:#dc2626">Wrong Answers: <strong>${summary.wrongAnswers}</strong></span>
-            <br><br>
-            <span style="color:#d97706">Unanswered Questions: <strong>${summary.unanswered}</strong></span>
-            <br><br>
-            ${status}
-        `;
-    }
-
-    renderResult("Saving result...");
-
-    const saved = await saveResult();
-
-    if (saved) {
-        renderResult('<span style="color:#16a34a">Result saved successfully</span>');
-
-        if (user && user.role === "admin") {
-            await Promise.all([
-                loadAdminStats(),
-                loadAdminResults()
-            ]);
-        }
-    } else {
-        renderResult('<span style="color:#dc2626">Result could not be saved. Please contact the administrator.</span>');
-    }
-}
-
-async function showDashboard() {
-    clearInterval(timerInterval);
-
-    quizBox.classList.add("hidden");
-    adminBox.classList.add("hidden");
-    questionBox.classList.add("hidden");
-    resultBox.classList.add("hidden");
-
-    userDashboard.classList.remove("hidden");
-
-    await loadMyResults();
-}
-
-async function loadMyResults() {
-    const resultsList = document.getElementById("myResultsList");
-    resultsList.innerHTML = "Loading results...";
-
-    if (!token) {
-        resultsList.textContent = "Please login first.";
-        return;
-    }
-
-    try {
-        const response = await fetch(`${API_URL}/api/results/my-results`, {
-            headers: {
-                Authorization: `Bearer ${token}`
-            }
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            resultsList.textContent = data.message || "Unable to load results";
-            return;
-        }
-
-        if (!Array.isArray(data) || !data.length) {
-            resultsList.textContent = "Complete a quiz to see your results here.";
-            return;
-        }
-
-        resultsList.innerHTML = "";
-
-        data.forEach(result => {
-            const div = document.createElement("div");
-            div.className = "result-card";
-
-            const heading = document.createElement("h3");
-            heading.textContent = result.quiz?.title || "Quiz";
-
-            const scoreText = document.createElement("p");
-            scoreText.textContent =
-                `Score: ${result.score ?? 0} / ${result.totalQuestions ?? 0}`;
-
-            const percentage = document.createElement("p");
-            percentage.textContent = `Percentage: ${result.percentage ?? 0}%`;
-
-            const completed = document.createElement("p");
-            completed.textContent = `Completed: ${
-                result.completedAt
-                    ? new Date(result.completedAt).toLocaleString()
-                    : "N/A"
-            }`;
-
-            div.append(heading, scoreText, percentage, completed);
-            resultsList.appendChild(div);
-        });
-    } catch {
-        resultsList.textContent = "Unable to load quiz results.";
-    }
-}
-
-function showQuizzes() {
-    clearInterval(timerInterval);
-
-    userDashboard.classList.add("hidden");
     resultBox.classList.add("hidden");
     questionBox.classList.add("hidden");
     quizBox.classList.remove("hidden");
 
-    if (user && user.role === "admin") {
-        adminBox.classList.remove("hidden");
-
-        loadAdminStats();
-        loadAdminQuizzes();
-        loadAdminResults();
-    } else {
-        adminBox.classList.add("hidden");
-    }
-
-    loadQuizzes();
+    await loadQuizzes();
 }
 
 function logout() {
     clearInterval(timerInterval);
 
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
+
     token = null;
-    user = null;
+    quizzes = [];
     currentQuiz = null;
     currentQuestion = 0;
     score = 0;
     selectedAnswer = null;
-    answers = [];
-    resultSubmitted = false;
-    allAdminResults = [];
-
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
 
     quizBox.classList.add("hidden");
-    userDashboard.classList.add("hidden");
-    adminBox.classList.add("hidden");
     questionBox.classList.add("hidden");
     resultBox.classList.add("hidden");
-    registerBox.classList.add("hidden");
     loginBox.classList.remove("hidden");
 
     document.getElementById("email").value = "";
@@ -1123,25 +331,25 @@ function logout() {
     document.getElementById("loginMessage").textContent = "";
 }
 
-if (token && user) {
-    loginBox.classList.add("hidden");
-    registerBox.classList.add("hidden");
-    quizBox.classList.remove("hidden");
-
-    if (user.role === "admin") {
-        adminBox.classList.remove("hidden");
-
-        loadAdminStats();
-        loadAdminQuizzes();
-        loadAdminResults();
-    } else {
-        adminBox.classList.add("hidden");
+async function loadMyResults() {
+    try {
+        return await apiRequest("/api/results/my-results");
+    } catch (error) {
+        alert(error.message);
+        return [];
     }
+}
 
+async function loadStats() {
+    try {
+        return await apiRequest("/api/auth/stats");
+    } catch (error) {
+        alert(error.message);
+        return null;
+    }
+}
+
+if (token) {
+    loginBox.classList.add("hidden");
     loadQuizzes();
-} else {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    token = null;
-    user = null;
 }
