@@ -9,6 +9,7 @@ let selectedAnswer = null;
 let timerInterval = null;
 let timeLeft = 0;
 let answers = [];
+let isFinishing = false;
 
 const loginBox = document.getElementById("loginBox");
 const registerBox = document.getElementById("registerBox");
@@ -177,6 +178,7 @@ function startQuiz(index) {
     score = 0;
     selectedAnswer = null;
     answers = new Array(currentQuiz.questions.length).fill(null);
+    isFinishing = false;
 
     clearInterval(timerInterval);
 
@@ -289,81 +291,6 @@ function nextQuestion() {
     }
 }
 
-function isCorrectAnswer(selectedIndex, correct) {
-    const questionData = currentQuiz.questions[currentQuestion];
-    const selectedOption = questionData.options[selectedIndex];
-
-    const selectedValue = typeof selectedOption === "string"
-        ? selectedOption
-        : selectedOption?.text ?? selectedOption?.option ?? selectedOption?.value ?? "";
-
-    const correctValue = typeof correct === "string"
-        ? correct
-        : correct?.text ?? correct?.option ?? correct?.value ?? "";
-
-    const selectedText = String(selectedValue).trim();
-    const correctText = String(correctValue).trim();
-
-    if (selectedText.toLowerCase() === correctText.toLowerCase()) {
-        return true;
-    }
-
-    const optionIndex = questionData.options.findIndex(option => {
-        const value = typeof option === "string"
-            ? option
-            : option?.text ?? option?.option ?? option?.value ?? "";
-
-        return String(value).trim().toLowerCase() === correctText.toLowerCase();
-    });
-
-    if (optionIndex !== -1) {
-        return optionIndex === selectedIndex;
-    }
-
-    if (/^[1-4]$/.test(correctText)) {
-        return selectedIndex === Number(correctText) - 1;
-    }
-
-    return false;
-}
-
-async function finishQuiz() {
-    if (!currentQuiz) return;
-
-    clearInterval(timerInterval);
-
-    score = 0;
-
-    currentQuiz.questions.forEach((questionData, index) => {
-        if (answers[index] !== null && isCorrectAnswerForQuestion(questionData, answers[index])) {
-            score++;
-        }
-    });
-
-    hideAllBoxes();
-    resultBox.classList.remove("hidden");
-
-    const total = currentQuiz.questions.length;
-    const percentage = total ? Math.round((score / total) * 100) : 0;
-
-    document.getElementById("result").textContent =
-        `You scored ${score} out of ${total}. Percentage: ${percentage}%`;
-
-    try {
-        await apiRequest("/api/results", {
-            method: "POST",
-            body: JSON.stringify({
-                quizId: currentQuiz._id,
-                score,
-                totalQuestions: total,
-                percentage
-            })
-        });
-    } catch (error) {
-        console.error("Unable to save quiz result:", error.message);
-    }
-}
-
 function isCorrectAnswerForQuestion(questionData, selectedIndex) {
     const selectedOption = questionData.options[selectedIndex];
 
@@ -397,8 +324,56 @@ function isCorrectAnswerForQuestion(questionData, selectedIndex) {
     return false;
 }
 
+async function finishQuiz() {
+    if (!currentQuiz || isFinishing) return;
+
+    isFinishing = true;
+    clearInterval(timerInterval);
+
+    score = 0;
+
+    currentQuiz.questions.forEach((questionData, index) => {
+        if (answers[index] !== null && isCorrectAnswerForQuestion(questionData, answers[index])) {
+            score++;
+        }
+    });
+
+    hideAllBoxes();
+    resultBox.classList.remove("hidden");
+
+    const total = currentQuiz.questions.length;
+    const percentage = total ? Math.round((score / total) * 100) : 0;
+    const resultElement = document.getElementById("result");
+
+    resultElement.textContent =
+        `You scored ${score} out of ${total}. Percentage: ${percentage}%. Saving result...`;
+
+    try {
+        await apiRequest("/api/results", {
+            method: "POST",
+            body: JSON.stringify({
+                quiz: currentQuiz._id,
+                score,
+                totalQuestions: total,
+                percentage
+            })
+        });
+
+        resultElement.textContent =
+            `You scored ${score} out of ${total}. Percentage: ${percentage}%. Result saved successfully.`;
+    } catch (error) {
+        console.error("Unable to save quiz result:", error.message);
+
+        resultElement.textContent =
+            `You scored ${score} out of ${total}. Percentage: ${percentage}%. Result could not be saved: ${error.message}`;
+    } finally {
+        isFinishing = false;
+    }
+}
+
 async function showQuizzes() {
     clearInterval(timerInterval);
+    isFinishing = false;
     await loadQuizzes();
 }
 
@@ -454,6 +429,7 @@ function logout() {
     score = 0;
     selectedAnswer = null;
     answers = [];
+    isFinishing = false;
 
     hideAllBoxes();
     loginBox.classList.remove("hidden");
