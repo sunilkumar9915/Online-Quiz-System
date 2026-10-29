@@ -2,7 +2,14 @@
 const API_URL = "https://online-quiz-system-991.onrender.com";
 
 let token = localStorage.getItem("token");
-let currentUser = JSON.parse(localStorage.getItem("user") || "{}");
+let currentUser = {};
+
+try {
+    currentUser = JSON.parse(localStorage.getItem("user") || "{}");
+} catch {
+    currentUser = {};
+}
+
 let quizzes = [];
 let currentQuiz = null;
 let currentQuestion = 0;
@@ -10,8 +17,9 @@ let score = 0;
 let selectedAnswer = null;
 let timerInterval = null;
 let timeLeft = 0;
+let quizFinished = false;
 
-const get = (id) => document.getElementById(id);
+const get = id => document.getElementById(id);
 
 function hideAllBoxes() {
     [
@@ -62,7 +70,9 @@ async function apiRequest(path, options = {}) {
     }
 
     if (!response.ok) {
-        throw new Error(data.message || `Request failed: ${response.status}`);
+        throw new Error(
+            data.message || `Request failed with status ${response.status}`
+        );
     }
 
     return data;
@@ -77,23 +87,28 @@ function logout() {
     token = null;
     currentUser = {};
     currentQuiz = null;
+    quizzes = [];
+    selectedAnswer = null;
 
     showBox("loginBox");
+
     setMessage("loginMessage", "");
     setMessage("registerMessage", "");
+    setMessage("adminMessage", "");
 }
 
-async function login() {
+async function login(event) {
+    if (event) event.preventDefault();
+
     const email = get("email")?.value.trim();
     const password = get("password")?.value;
-    const message = get("loginMessage");
 
     if (!email || !password) {
         setMessage("loginMessage", "Please enter email and password.");
         return;
     }
 
-    if (message) message.textContent = "Logging in...";
+    setMessage("loginMessage", "Logging in...");
 
     try {
         const data = await apiRequest("/api/auth/login", {
@@ -102,7 +117,7 @@ async function login() {
         });
 
         if (!data.token || !data.user) {
-            throw new Error("The server did not return a token and user.");
+            throw new Error("Login response is incomplete.");
         }
 
         token = data.token;
@@ -110,6 +125,8 @@ async function login() {
 
         localStorage.setItem("token", token);
         localStorage.setItem("user", JSON.stringify(currentUser));
+
+        setMessage("loginMessage", "");
 
         if (currentUser.role === "admin") {
             await showAdminDashboard();
@@ -121,7 +138,9 @@ async function login() {
     }
 }
 
-async function register() {
+async function register(event) {
+    if (event) event.preventDefault();
+
     const name = get("registerName")?.value.trim();
     const email = get("registerEmail")?.value.trim();
     const password = get("registerPassword")?.value;
@@ -131,26 +150,45 @@ async function register() {
         return;
     }
 
+    if (password.length < 6) {
+        setMessage(
+            "registerMessage",
+            "Password must be at least 6 characters."
+        );
+        return;
+    }
+
+    setMessage("registerMessage", "Creating your account...");
+
     try {
-        const data = await apiRequest("/api/auth/register", {
+        const data = await apiRequest("/api/auth/signup", {
             method: "POST",
             body: JSON.stringify({ name, email, password })
         });
 
         setMessage(
-            "registerMessage",
-            data.message || "Registration successful. Please log in."
+            "loginMessage",
+            data.message || "Account created successfully. Please log in."
         );
+
+        setMessage("registerMessage", "");
+
+        if (get("loginForm")) get("loginForm").reset();
+        if (get("registerForm")) get("registerForm").reset();
 
         showBox("loginBox");
     } catch (error) {
-        setMessage("registerMessage", error.message || "Registration failed.");
+        setMessage(
+            "registerMessage",
+            error.message || "Account creation failed."
+        );
     }
 }
 
 async function loadQuizzes() {
     try {
         const data = await apiRequest("/api/quizzes");
+
         quizzes = Array.isArray(data) ? data : data.quizzes || [];
 
         showBox("quizBox");
@@ -160,7 +198,8 @@ async function loadQuizzes() {
 
         const list = get("quizList");
         if (list) {
-            list.textContent = error.message || "Unable to load quizzes.";
+            list.textContent =
+                error.message || "Unable to load quizzes.";
         }
     }
 }
@@ -184,12 +223,15 @@ function renderQuizzes() {
         title.textContent = quiz.title || "Untitled Quiz";
 
         const duration = document.createElement("p");
-        duration.textContent = `Duration: ${quiz.duration || 10} minutes`;
+        duration.textContent =
+            `Duration: ${Number(quiz.duration || 10)} minutes`;
 
         const count = document.createElement("p");
-        count.textContent = `Questions: ${(quiz.questions || []).length}`;
+        count.textContent =
+            `Questions: ${(quiz.questions || []).length}`;
 
         const button = document.createElement("button");
+        button.type = "button";
         button.textContent = "Start Quiz";
         button.addEventListener("click", () => startQuiz(index));
 
@@ -206,26 +248,35 @@ function startQuiz(index) {
         return;
     }
 
+    stopTimer();
+
     currentQuestion = 0;
     score = 0;
     selectedAnswer = null;
+    quizFinished = false;
 
-    timeLeft = Math.max(1, Number(currentQuiz.duration || 10)) * 60;
+    timeLeft = Math.max(
+        1,
+        Number(currentQuiz.duration || 10)
+    ) * 60;
 
     showBox("questionBox");
 
     if (get("quizTitle")) {
-        get("quizTitle").textContent = currentQuiz.title || "Quiz";
+        get("quizTitle").textContent =
+            currentQuiz.title || "Quiz";
     }
 
+    setMessage("questionMessage", "");
     showQuestion();
     startTimer();
 }
 
 function showQuestion() {
-    if (!currentQuiz) return;
+    if (!currentQuiz || quizFinished) return;
 
     const questionData = currentQuiz.questions[currentQuestion];
+
     if (!questionData) {
         finishQuiz();
         return;
@@ -239,8 +290,11 @@ function showQuestion() {
     }
 
     if (get("question")) {
-        get("question").textContent = questionData.question || "";
+        get("question").textContent =
+            questionData.question || "";
     }
+
+    setMessage("questionMessage", "");
 
     const optionsContainer = get("options");
     if (!optionsContainer) return;
@@ -257,21 +311,27 @@ function showQuestion() {
         button.className = "option";
 
         const optionText =
-            typeof option === "object"
+            typeof option === "object" && option !== null
                 ? option.text ?? option.option ?? option.label ?? ""
                 : option;
 
         button.textContent = String(optionText);
+
         button.addEventListener("click", () => {
+            if (quizFinished) return;
+
             optionsContainer.querySelectorAll(".option").forEach(item => {
                 item.classList.remove("selected");
             });
 
             button.classList.add("selected");
+
             selectedAnswer = {
                 index,
-                value: optionText
+                value: String(optionText).trim()
             };
+
+            setMessage("questionMessage", "");
         });
 
         optionsContainer.appendChild(button);
@@ -283,7 +343,12 @@ function startTimer() {
     updateTimerDisplay();
 
     timerInterval = setInterval(() => {
-        timeLeft--;
+        if (quizFinished) {
+            stopTimer();
+            return;
+        }
+
+        timeLeft = Math.max(0, timeLeft - 1);
         updateTimerDisplay();
 
         if (timeLeft <= 0) {
@@ -293,7 +358,7 @@ function startTimer() {
 }
 
 function stopTimer() {
-    if (timerInterval) {
+    if (timerInterval !== null) {
         clearInterval(timerInterval);
         timerInterval = null;
     }
@@ -311,10 +376,10 @@ function updateTimerDisplay() {
 }
 
 function nextQuestion() {
-    if (!currentQuiz) return;
+    if (!currentQuiz || quizFinished) return;
 
     if (!selectedAnswer) {
-        alert("Please select an answer.");
+        setMessage("questionMessage", "Please select an answer.");
         return;
     }
 
@@ -322,14 +387,33 @@ function nextQuestion() {
     const correct = questionData.answer;
 
     const correctValue =
-        typeof correct === "object"
-            ? correct.text ?? correct.option ?? correct.label
+        typeof correct === "object" && correct !== null
+            ? correct.text ?? correct.option ?? correct.label ?? ""
             : correct;
 
-    if (
+    const chosenOption = questionData.options?.[selectedAnswer.index];
+
+    const chosenValue =
+        typeof chosenOption === "object" && chosenOption !== null
+            ? chosenOption.text ?? chosenOption.option ?? chosenOption.label ?? ""
+            : chosenOption;
+
+    const correctIndex =
+        typeof correct === "number"
+            ? correct
+            : typeof correctValue === "string" &&
+              /^\d+$/.test(correctValue.trim())
+                ? Number(correctValue)
+                : -1;
+
+    const isCorrect =
+        (correctIndex >= 0 && selectedAnswer.index === correctIndex) ||
         String(selectedAnswer.value).trim().toLowerCase() ===
-        String(correctValue).trim().toLowerCase()
-    ) {
+        String(correctValue).trim().toLowerCase() ||
+        String(chosenValue).trim().toLowerCase() ===
+        String(correctValue).trim().toLowerCase();
+
+    if (isCorrect) {
         score++;
     }
 
@@ -343,12 +427,15 @@ function nextQuestion() {
 }
 
 async function finishQuiz() {
+    if (!currentQuiz || quizFinished) return;
+
+    quizFinished = true;
     stopTimer();
 
-    if (!currentQuiz) return;
-
     const total = currentQuiz.questions.length;
-    const percentage = total ? Math.round((score / total) * 100) : 0;
+    const percentage = total
+        ? Math.round((score / total) * 100)
+        : 0;
 
     showBox("resultBox");
 
@@ -361,7 +448,7 @@ async function finishQuiz() {
         await apiRequest("/api/results", {
             method: "POST",
             body: JSON.stringify({
-                quizId: currentQuiz._id || currentQuiz.id,
+                quiz: currentQuiz._id || currentQuiz.id,
                 score,
                 totalQuestions: total,
                 percentage
@@ -369,6 +456,11 @@ async function finishQuiz() {
         });
     } catch (error) {
         console.error("Could not save result:", error.message);
+
+        if (get("result")) {
+            get("result").textContent +=
+                " Your result could not be saved to the server.";
+        }
     }
 }
 
@@ -413,11 +505,16 @@ async function showDashboard() {
             percentage.textContent =
                 `Percentage: ${result.percentage ?? 0}%`;
 
-            row.append(title, scoreText, percentage);
+            const completed = document.createElement("p");
+            completed.textContent = result.completedAt
+                ? `Completed: ${new Date(result.completedAt).toLocaleString()}`
+                : "";
+
+            row.append(title, scoreText, percentage, completed);
             container.appendChild(row);
         });
     } catch (error) {
-        alert(error.message || "Unable to load dashboard.");
+        alert(error.message || "Unable to load results.");
     }
 }
 
@@ -432,9 +529,11 @@ async function showAdminDashboard() {
 
     showBox("adminBox");
 
-    await loadAdminQuizzes();
-    await loadAdminResults();
-    await loadAdminStats();
+    await Promise.all([
+        loadAdminQuizzes(),
+        loadAdminResults(),
+        loadAdminStats()
+    ]);
 }
 
 async function loadAdminQuizzes() {
@@ -446,6 +545,7 @@ async function loadAdminQuizzes() {
         const filter = get("resultsQuizFilter");
 
         if (filter) {
+            const previousValue = filter.value;
             filter.replaceChildren();
 
             const allOption = document.createElement("option");
@@ -456,9 +556,11 @@ async function loadAdminQuizzes() {
             quizzes.forEach(quiz => {
                 const option = document.createElement("option");
                 option.value = quiz._id || quiz.id;
-                option.textContent = quiz.title;
+                option.textContent = quiz.title || "Untitled Quiz";
                 filter.appendChild(option);
             });
+
+            filter.value = previousValue;
         }
 
         if (!container) return;
@@ -482,6 +584,7 @@ async function loadAdminQuizzes() {
                 `Duration: ${quiz.duration || 10} minutes | Questions: ${(quiz.questions || []).length}`;
 
             const deleteButton = document.createElement("button");
+            deleteButton.type = "button";
             deleteButton.textContent = "Delete Quiz";
             deleteButton.addEventListener("click", () => {
                 deleteQuiz(quiz._id || quiz.id);
@@ -499,35 +602,46 @@ async function createQuiz(event) {
     if (event) event.preventDefault();
 
     if (currentUser.role !== "admin") {
-        alert("Admin access required.");
+        setMessage("adminMessage", "Admin access required.");
         return;
     }
 
     const title = get("quizTitleInput")?.value.trim();
     const duration = Number(get("quizDurationInput")?.value);
     const questionText = get("newQuestion")?.value.trim();
-    const optionsText = get("newOptions")?.value.trim();
-    const answer = get("correctAnswer")?.value.trim();
 
-    if (!title || !duration || !questionText || !optionsText || !answer) {
-        setMessage("adminMessage", "Please fill in all quiz and question fields.");
+    const options = [
+        get("option1")?.value.trim(),
+        get("option2")?.value.trim(),
+        get("option3")?.value.trim(),
+        get("option4")?.value.trim()
+    ];
+
+    const correctAnswerIndex = get("correctAnswer")?.value;
+
+    if (
+        !title ||
+        !Number.isFinite(duration) ||
+        duration < 1 ||
+        !questionText ||
+        options.some(option => !option) ||
+        correctAnswerIndex === "" ||
+        correctAnswerIndex === undefined
+    ) {
+        setMessage("adminMessage", "Please fill in all quiz fields.");
         return;
     }
 
-    const options = optionsText
-        .split(",")
-        .map(option => option.trim())
-        .filter(Boolean);
+    const answerIndex = Number(correctAnswerIndex);
 
-    if (options.length < 2) {
-        setMessage("adminMessage", "Enter at least two options separated by commas.");
+    if (answerIndex < 0 || answerIndex >= options.length) {
+        setMessage("adminMessage", "Please select the correct answer.");
         return;
     }
 
-    if (!options.some(option => option.toLowerCase() === answer.toLowerCase())) {
-        setMessage("adminMessage", "The correct answer must match one of the options.");
-        return;
-    }
+    const answer = options[answerIndex];
+
+    setMessage("adminMessage", "Creating quiz...");
 
     try {
         await apiRequest("/api/quizzes", {
@@ -545,16 +659,17 @@ async function createQuiz(event) {
 
         setMessage("adminMessage", "Quiz created successfully.");
 
-        if (get("quizTitleInput")) get("quizTitleInput").value = "";
-        if (get("quizDurationInput")) get("quizDurationInput").value = "";
-        if (get("newQuestion")) get("newQuestion").value = "";
-        if (get("newOptions")) get("newOptions").value = "";
-        if (get("correctAnswer")) get("correctAnswer").value = "";
+        if (get("questionForm")) {
+            get("questionForm").reset();
+        }
 
         await loadAdminQuizzes();
         await loadAdminStats();
     } catch (error) {
-        setMessage("adminMessage", error.message || "Could not create quiz.");
+        setMessage(
+            "adminMessage",
+            error.message || "Could not create quiz."
+        );
     }
 }
 
@@ -568,8 +683,10 @@ async function deleteQuiz(quizId) {
             method: "DELETE"
         });
 
-        setMessage("adminMessage", "Quiz deleted.");
+        setMessage("adminMessage", "Quiz deleted successfully.");
+
         await loadAdminQuizzes();
+        await loadAdminResults();
         await loadAdminStats();
     } catch (error) {
         setMessage("adminMessage", error.message || "Could not delete quiz.");
@@ -586,16 +703,14 @@ async function loadAdminResults() {
 
         container.replaceChildren();
 
-        const search = (get("resultsSearch")?.value || "").toLowerCase();
+        const search = (get("resultsSearch")?.value || "").toLowerCase().trim();
         const quizFilter = get("resultsQuizFilter")?.value || "";
         const scoreFilter = get("resultsScoreFilter")?.value || "";
 
         const filtered = results.filter(result => {
-            const userName =
-                result.user?.name || result.userName || result.name || "";
+            const userName = result.user?.name || result.userName || result.name || "";
             const email = result.user?.email || result.email || "";
-            const quizId =
-                result.quiz?._id || result.quizId || result.quiz?._id?.toString() || "";
+            const quizId = result.quiz?._id || result.quizId || result.quiz || "";
             const percentage = Number(result.percentage || 0);
 
             const matchesSearch =
@@ -606,8 +721,13 @@ async function loadAdminResults() {
 
             let matchesScore = true;
 
-            if (scoreFilter === "pass") matchesScore = percentage >= 40;
-            if (scoreFilter === "fail") matchesScore = percentage < 40;
+            if (scoreFilter === "80") {
+                matchesScore = percentage >= 80;
+            } else if (scoreFilter === "40") {
+                matchesScore = percentage >= 40 && percentage < 80;
+            } else if (scoreFilter === "below40") {
+                matchesScore = percentage < 40;
+            }
 
             return matchesSearch && matchesQuiz && matchesScore;
         });
@@ -633,11 +753,16 @@ async function loadAdminResults() {
             quiz.textContent =
                 `Quiz: ${result.quiz?.title || result.quizTitle || "Quiz"}`;
 
-            const score = document.createElement("p");
-            score.textContent =
+            const scoreText = document.createElement("p");
+            scoreText.textContent =
                 `Score: ${result.score ?? 0}/${result.totalQuestions ?? 0} (${result.percentage ?? 0}%)`;
 
-            row.append(student, email, quiz, score);
+            const completed = document.createElement("p");
+            completed.textContent = result.completedAt
+                ? `Completed: ${new Date(result.completedAt).toLocaleString()}`
+                : "";
+
+            row.append(student, email, quiz, scoreText, completed);
             container.appendChild(row);
         });
     } catch (error) {
@@ -647,51 +772,23 @@ async function loadAdminResults() {
 
 async function loadAdminStats() {
     try {
-        const [quizData, resultData] = await Promise.all([
-            apiRequest("/api/quizzes"),
-            apiRequest("/api/results")
-        ]);
+        const stats = await apiRequest("/api/auth/stats");
 
-        const adminQuizzes = Array.isArray(quizData)
-            ? quizData
-            : quizData.quizzes || [];
-
-        const results = Array.isArray(resultData)
-            ? resultData
-            : resultData.results || [];
+        if (get("totalUsers")) {
+            get("totalUsers").textContent = stats.totalUsers ?? 0;
+        }
 
         if (get("totalQuizzes")) {
-            get("totalQuizzes").textContent = adminQuizzes.length;
+            get("totalQuizzes").textContent = stats.totalQuizzes ?? 0;
         }
 
         if (get("totalAttempts")) {
-            get("totalAttempts").textContent = results.length;
-        }
-
-        if (get("totalUsers")) {
-            const users = new Set(
-                results.map(result =>
-                    result.user?._id ||
-                    result.userId ||
-                    result.user?.email ||
-                    result.email
-                ).filter(Boolean)
-            );
-
-            get("totalUsers").textContent = users.size;
+            get("totalAttempts").textContent = stats.totalAttempts ?? 0;
         }
 
         if (get("averageScore")) {
-            const average = results.length
-                ? Math.round(
-                    results.reduce(
-                        (sum, result) => sum + Number(result.percentage || 0),
-                        0
-                    ) / results.length
-                )
-                : 0;
-
-            get("averageScore").textContent = `${average}%`;
+            get("averageScore").textContent =
+                `${stats.averageScore ?? 0}%`;
         }
     } catch (error) {
         console.error("Admin statistics:", error.message);
@@ -700,7 +797,30 @@ async function loadAdminStats() {
 
 /* EVENT LISTENERS */
 
+get("loginForm")?.addEventListener("submit", login);
+get("registerForm")?.addEventListener("submit", register);
 get("questionForm")?.addEventListener("submit", createQuiz);
+
+get("showRegister")?.addEventListener("click", event => {
+    event.preventDefault();
+    setMessage("registerMessage", "");
+    showBox("registerBox");
+});
+
+get("showLogin")?.addEventListener("click", event => {
+    event.preventDefault();
+    setMessage("loginMessage", "");
+    showBox("loginBox");
+});
+
+get("nextButton")?.addEventListener("click", nextQuestion);
+get("backToQuizzes")?.addEventListener("click", showQuizzes);
+get("backToStudentQuizzes")?.addEventListener("click", loadQuizzes);
+get("studentDashboardButton")?.addEventListener("click", showDashboard);
+
+get("logoutButton")?.addEventListener("click", logout);
+get("studentLogoutButton")?.addEventListener("click", logout);
+get("adminLogoutButton")?.addEventListener("click", logout);
 
 get("resultsSearch")?.addEventListener("input", loadAdminResults);
 get("resultsQuizFilter")?.addEventListener("change", loadAdminResults);
@@ -714,10 +834,15 @@ async function startApp() {
         return;
     }
 
-    if (currentUser.role === "admin") {
-        await showAdminDashboard();
-    } else {
-        await loadQuizzes();
+    try {
+        if (currentUser.role === "admin") {
+            await showAdminDashboard();
+        } else {
+            await loadQuizzes();
+        }
+    } catch (error) {
+        console.error("App startup:", error.message);
+        showBox("loginBox");
     }
 }
 
