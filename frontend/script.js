@@ -255,9 +255,11 @@ function startQuiz(index) {
     selectedAnswer = null;
     quizFinished = false;
 
+    const duration = Number(currentQuiz.duration || 10);
+
     timeLeft = Math.max(
         1,
-        Number(currentQuiz.duration || 10)
+        Number.isFinite(duration) ? duration : 10
     ) * 60;
 
     showBox("questionBox");
@@ -268,6 +270,7 @@ function startQuiz(index) {
     }
 
     setMessage("questionMessage", "");
+
     showQuestion();
     startTimer();
 }
@@ -340,21 +343,40 @@ function showQuestion() {
 
 function startTimer() {
     stopTimer();
-    updateTimerDisplay();
 
-    timerInterval = setInterval(() => {
+    const timerElement = get("quizTimer");
+
+    if (!timerElement) {
+        console.error("Timer element not found: quizTimer");
+        return;
+    }
+
+    const endTime = Date.now() + timeLeft * 1000;
+
+    function updateCountdown() {
         if (quizFinished) {
             stopTimer();
             return;
         }
 
-        timeLeft = Math.max(0, timeLeft - 1);
+        timeLeft = Math.max(
+            0,
+            Math.ceil((endTime - Date.now()) / 1000)
+        );
+
         updateTimerDisplay();
 
         if (timeLeft <= 0) {
+            stopTimer();
             finishQuiz();
         }
-    }, 1000);
+    }
+
+    updateCountdown();
+
+    if (!quizFinished && timeLeft > 0) {
+        timerInterval = setInterval(updateCountdown, 250);
+    }
 }
 
 function stopTimer() {
@@ -847,6 +869,7 @@ async function startApp() {
 }
 
 startApp();
+
 function showRegister() {
     document.getElementById("loginBox").classList.add("hidden");
     document.getElementById("registerBox").classList.remove("hidden");
