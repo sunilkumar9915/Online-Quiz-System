@@ -1,123 +1,133 @@
 # Online Quiz System
 
-An Online Quiz System developed using HTML, CSS, JavaScript, Node.js, Express.js, and MongoDB. The application allows students to attempt quizzes online and enables administrators to manage quizzes and view student results.
+A full-stack web application that allows students to register, log in, attempt online quizzes, and view their results. Administrators can create and manage quizzes and monitor student performance.
+
+## Live Demo
+
+- **Frontend:** https://frolicking-douhua-958620.netlify.app/
+- **Backend API:** https://online-quiz-system-991.onrender.com
 
 ## Features
 
-- User registration and login
-- Secure authentication using JSON Web Tokens (JWT)
-- Role-based access for administrators and students
+### Student
+- Student registration and login
+- Secure authentication using JWT
+- View available quizzes
+- Attempt quizzes with a countdown timer
+- Automatic score and percentage calculation
+- View previous quiz results
+
+### Admin
+- Admin login and dashboard
 - Create and manage quizzes
-- Multiple-choice questions
-- Quiz timer
-- Automatic score calculation
-- Student result tracking
-- Admin dashboard for managing quizzes and reviewing results
-- Responsive user interface
+- Add questions and multiple-choice options
+- Set quiz duration
+- View student results and performance
 
 ## Technologies Used
 
-### Frontend
-- HTML5
-- CSS3
-- JavaScript
-
-### Backend
-- Node.js
-- Express.js
-- REST API
-
-### Database
-- MongoDB
-- Mongoose
-
-### Authentication and Security
-- JSON Web Token (JWT)
-- bcryptjs for password hashing
+| Technology | Purpose |
+|---|---|
+| HTML5 | Website structure |
+| CSS3 | Styling and layout |
+| JavaScript | Frontend functionality |
+| Node.js | Backend runtime |
+| Express.js | Backend framework |
+| MongoDB | Database |
+| Mongoose | Database modeling |
+| JWT | Authentication |
+| bcryptjs | Password hashing |
+| Netlify | Frontend deployment |
+| Render | Backend deployment |
 
 ## Project Structure
 
 ```text
 Online-Quiz-System/
+│
+├── frontend/
+│   ├── index.html
+│   ├── style.css
+│   └── script.js
+│
 ├── backend/
 │   ├── config/
 │   ├── middleware/
 │   ├── models/
 │   ├── routes/
+│   ├── server.js
 │   ├── package.json
-│   └── server.js
-├── frontend/
-│   ├── index.html
-│   ├── style.css
-│   └── script.js
-├── .gitignore
+│   └── .env
+│
 └── README.md
 ```
 
 ## Installation and Setup
 
-### 1. Clone the repository
+### 1. Clone the Repository
 
 ```bash
 git clone https://github.com/sunilkumar9915/Online-Quiz-System.git
+```
+
+### 2. Open the Project
+
+```bash
 cd Online-Quiz-System
 ```
 
-### 2. Install backend dependencies
+### 3. Install Backend Dependencies
 
 ```bash
 cd backend
 npm install
 ```
 
-### 3. Configure environment variables
+### 4. Configure Environment Variables
 
-Create a `.env` file inside the `backend` folder and add your own configuration:
+Create a `.env` file inside the backend folder:
 
 ```env
 PORT=5000
 MONGO_URI=your_mongodb_connection_string
-JWT_SECRET=your_secure_secret_key
+JWT_SECRET=your_secret_key
 ```
 
-Use the exact environment variable names expected by your backend code. Never upload your `.env` file or real credentials to GitHub.
+Use your own MongoDB connection string and JWT secret. Never upload your actual `.env` file or credentials to GitHub.
 
-### 4. Start the backend
+### 5. Start the Backend
 
 ```bash
-npm start
+npm run dev
 ```
 
-The backend should run on the port configured in your environment variables.
+The backend will run at:
 
-### 5. Run the frontend
+`http://localhost:5000`
 
-Open `frontend/index.html` in your browser or use the VS Code Live Server extension if your frontend setup supports it.
+## Screenshots
 
-Make sure the frontend API URL matches the backend address.
+Add your project screenshots here:
 
-## How It Works
-
-1. Users register or log in.
-2. The system authenticates users.
-3. Students select an available quiz.
-4. Students answer questions within the allowed time.
-5. The system calculates the score and displays the result.
-6. Administrators manage quizzes and review student results.
+- Login and Registration Page
+- Student Dashboard
+- Quiz Interface
+- Quiz Result Page
+- Admin Dashboard
 
 ## Future Enhancements
 
-- Add more question types.
-- Improve the reporting and analytics dashboard.
-- Add quiz categories and difficulty levels.
-- Deploy the application to a cloud hosting platform.
+- More quiz categories
+- Question randomization
+- Improved performance analytics
+- Enhanced security and validation
 
 ## Author
 
 **Sunil Kumar**
 
-GitHub: [sunilkumar9915](https://github.com/sunilkumar9915)
+GitHub: https://github.com/sunilkumar9915
 
 ## License
 
-This project is available for educational and learning purposes.
+This project is developed for academic and educational purposes.
